@@ -1,0 +1,30 @@
+# Virtual environment
+semgvenv/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Data files
+data/*.csv
+data/*.npy
+data/*.dat
+!data/.gitkeep
+
+# Logs
+*.log
