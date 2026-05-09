@@ -6,6 +6,7 @@
 
 v0.2: 批量入队 (25点/批) 降低锁争抢频率 90%+；
       消灭 _parse_line 中的 pass 违规，加入显式误码计数器。
+v0.3: 支持 READY 哨兵帧检测；连接后主动等待固件就绪信号，替代盲等 2 秒。
 """
 
 import threading
@@ -94,16 +95,41 @@ class SerialReader:
         return self._connected.wait(timeout=timeout)
 
     def _connect(self) -> bool:
-        """尝试建立串口连接"""
+        """尝试建立串口连接，等待固件发出 READY 哨兵帧"""
         try:
             self._serial = serial.Serial(
                 port=self._config.port,
                 baudrate=self._config.baud_rate,
                 timeout=self._config.timeout
             )
-            # 等待 Arduino 复位完成
-            time.sleep(2.0)
-            # 清空输入缓冲区中的启动垃圾数据
+
+            # 等待固件发出 "READY" 哨兵帧，而非盲等固定时长
+            # 最多等待 10 秒 (涵盖 Arduino 复位 + ADC 预热时间)
+            logger.info(f"等待固件就绪信号 (READY)...")
+            ready_timeout = 10.0
+            ready_deadline = time.monotonic() + ready_timeout
+
+            while time.monotonic() < ready_deadline:
+                if not self._running.is_set():
+                    # 外部请求停止，提前退出
+                    return False
+                try:
+                    raw = self._serial.readline()
+                    if raw:
+                        text = raw.decode('ascii', errors='ignore').strip()
+                        if text == 'READY':
+                            logger.info("固件就绪信号已收到")
+                            break
+                        # 忽略 READY 之前的任何其他行 (ADC 预热垃圾)
+                except (UnicodeDecodeError, serial.SerialException):
+                    pass  # 启动阶段的乱码可以静默丢弃
+            else:
+                logger.warning(
+                    f"等待 READY 超时 ({ready_timeout}s)，"
+                    "假设固件已就绪 (旧版固件无哨兵帧)"
+                )
+
+            # 清空连接期间积累的缓冲区垃圾
             self._serial.reset_input_buffer()
             self._connected.set()
             logger.info(f"已连接到 {self._config.port}")
@@ -169,7 +195,8 @@ class SerialReader:
         """
         解析 Arduino 发送的一行数据
 
-        期望格式: b"512\\r\\n" (纯文本 ADC 值)
+        期望格式: b"512\\r\\n" (纯文本 ADC 值, 0-1023)
+        哨兵帧 b"READY\\r\\n" 由 _connect() 处理，不会到达此处。
 
         Returns:
             解析成功返回浮点数值，失败返回 None
