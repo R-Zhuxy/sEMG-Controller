@@ -77,8 +77,13 @@ def run_calibration(
 
     1. 提示用户保持放松
     2. 等待采集足够的静息数据
-    3. 对数据进行滤波 + 包络提取
+    3. 对数据进行流式滤波 + 流式包络提取 (与实时处理完全一致的相位)
     4. 计算阈值
+
+    重要设计决策:
+      校准使用流式 apply() 而非 apply_batch(filtfilt)，确保阈值基准
+      与实时运行完全一致 (相同的群延迟和相位特性)。
+      校准结束后不重置滤波器状态，使主循环自然衔接。
     """
     samples_needed = int(
         config.calibration.calibration_duration * config.sampling.sample_rate
@@ -104,13 +109,16 @@ def run_calibration(
 
     print(f"\r     进度: 100.0% ({samples_needed}/{samples_needed})")
 
-    # 取出校准数据并处理
+    # 取出校准数据并用流式滤波处理 (与实时 apply 相位一致)
     raw_data = buffer.get_latest(samples_needed)
-    filtered_data = sig_filter.apply_batch(raw_data)
+    filtered_data = sig_filter.apply(raw_data)
     envelope_data = envelope_ext.extract(filtered_data)
 
-    # 重置流式滤波器状态（校准用了 batch 模式，不影响流式状态）
-    sig_filter.reset()
+    # 推进 read_new 读指针，跳过校准期间已处理的数据
+    buffer.read_new()
+
+    # 注意：不重置滤波器/包络状态！
+    # 校准数据就是实际信号流的开头，后续主循环的 apply() 自然衔接此处的 zi 状态。
 
     # 计算阈值
     return calibrator.compute_thresholds(envelope_data)
@@ -180,25 +188,23 @@ def main() -> None:
         print("       按 Ctrl+C 安全退出\n")
         print(f"  {'-' * 50}")
 
-        window_size = config.buffer.processing_window_size
         last_status_time = time.time()
         cycle_count = 0
+        current_envelope = 0.0
 
         while not shutdown_flag:
-            # 检查是否有足够的新数据
-            if buffer.count < window_size:
-                time.sleep(0.01)
+            # 只读取未消费的全新样本 (不重叠！)
+            new_samples = buffer.read_new()
+            if len(new_samples) == 0:
+                time.sleep(0.005)
                 continue
 
-            # 取最新窗口数据
-            raw_window = buffer.get_latest(window_size)
+            # 流式滤波 (输入严格为新数据，IIR 状态正确累积)
+            filtered = sig_filter.apply(new_samples)
 
-            # 滤波
-            filtered = sig_filter.apply(raw_window)
-
-            # 包络提取 (取最后一个值作为当前包络)
+            # 流式包络提取 (内部维护滑动 RMS + 平滑状态)
             envelope = envelope_ext.extract(filtered)
-            current_envelope = float(envelope[-1]) if len(envelope) > 0 else 0.0
+            current_envelope = float(envelope[-1])
 
             # 施密特触发器判定
             state_change = trigger.update(current_envelope)
@@ -222,12 +228,13 @@ def main() -> None:
                     f"threshold=[{cal_result.low_threshold:.4f}, "
                     f"{cal_result.high_threshold:.4f}] "
                     f"samples={reader.sample_count} "
+                    f"errors={reader.error_count} "
                     f"cycles={cycle_count}"
                 )
                 last_status_time = now
 
-            # 控制处理频率 (~100Hz 处理循环)
-            time.sleep(0.01)
+            # 控制处理频率 (~200Hz 处理循环)
+            time.sleep(0.005)
 
     except TimeoutError as e:
         logger.error(f"超时错误: {e}")

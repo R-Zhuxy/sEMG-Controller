@@ -1,20 +1,28 @@
 """
 串口数据读取线程
 
-独立守护线程持续读取 Arduino 串口数据，解析为数值后写入环形缓冲区。
-包含自动连接重试、异常恢复和优雅停止机制。
+独立守护线程持续读取 Arduino 串口数据，解析为数值后批量写入环形缓冲区。
+包含自动连接重试、异常恢复、误码计数和优雅停止机制。
+
+v0.2: 批量入队 (25点/批) 降低锁争抢频率 90%+；
+      消灭 _parse_line 中的 pass 违规，加入显式误码计数器。
 """
 
 import threading
 import logging
 import time
 
+import numpy as np
 import serial
 
 from ..core.ring_buffer import RingBuffer
 from ..config import SerialConfig
 
 logger = logging.getLogger(__name__)
+
+# 每积累 BATCH_SIZE 个样本才一次性 extend 入缓冲区
+# 500Hz / 25 = 20 次/秒上锁，相比逐样本 append 降低 96%
+_BATCH_SIZE = 25
 
 
 class SerialReader:
@@ -46,6 +54,10 @@ class SerialReader:
     @property
     def sample_count(self) -> int:
         return self._sample_count
+
+    @property
+    def error_count(self) -> int:
+        return self._error_count
 
     def start(self) -> None:
         """启动串口读取线程"""
@@ -110,6 +122,8 @@ class SerialReader:
 
     def _read_loop(self) -> None:
         """串口读取主循环 (在守护线程中运行)"""
+        batch: list[float] = []
+
         while self._running.is_set():
             # 如果未连接，尝试连接
             if not self._connected.is_set():
@@ -124,8 +138,21 @@ class SerialReader:
                 if line:
                     value = self._parse_line(line)
                     if value is not None:
-                        self._buffer.append(value)
+                        batch.append(value)
                         self._sample_count += 1
+
+                        # 批量入队：积累够 BATCH_SIZE 个才上锁写入一次
+                        if len(batch) >= _BATCH_SIZE:
+                            self._buffer.extend(
+                                np.array(batch, dtype=np.float64)
+                            )
+                            batch.clear()
+                elif batch:
+                    # readline 超时返回空行，刷入剩余数据防止延迟
+                    self._buffer.extend(
+                        np.array(batch, dtype=np.float64)
+                    )
+                    batch.clear()
             except serial.SerialException as e:
                 logger.error(f"串口读取错误: {e}")
                 self._close_serial()
@@ -133,8 +160,12 @@ class SerialReader:
                 logger.error(f"系统 I/O 错误: {e}")
                 self._close_serial()
 
-    @staticmethod
-    def _parse_line(line: bytes) -> float | None:
+        # 线程退出前刷入剩余数据
+        if batch:
+            self._buffer.extend(np.array(batch, dtype=np.float64))
+            batch.clear()
+
+    def _parse_line(self, line: bytes) -> float | None:
         """
         解析 Arduino 发送的一行数据
 
@@ -142,11 +173,19 @@ class SerialReader:
 
         Returns:
             解析成功返回浮点数值，失败返回 None
+            失败时递增误码计数器并记录警告日志
         """
         try:
             text = line.decode('ascii').strip()
             if text:
                 return float(text)
-        except (ValueError, UnicodeDecodeError):
-            pass
-        return None
+            return None
+        except (ValueError, UnicodeDecodeError) as e:
+            self._error_count += 1
+            # 前 10 个错误每次都报，之后每 100 次报一次，避免日志洪泛
+            if self._error_count <= 10 or self._error_count % 100 == 0:
+                logger.warning(
+                    f"串口数据解析失败 (第 {self._error_count} 次): "
+                    f"raw={line!r}, error={e}"
+                )
+            return None

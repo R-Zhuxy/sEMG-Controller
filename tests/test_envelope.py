@@ -1,4 +1,4 @@
-"""EnvelopeExtractor 单元测试"""
+"""EnvelopeExtractor 单元测试 (v0.2: 流式累积 RMS 实现)"""
 
 import numpy as np
 import pytest
@@ -23,10 +23,9 @@ class TestEnvelopeExtractor:
         data = np.ones(200) * 5.0
         envelope = extractor.extract(data)
         assert len(envelope) == len(data)
-        # 包络值应接近 5.0 (排除首尾的边界效应区域)
-        mid_start = 50
-        mid_end = len(data) - 50
-        np.testing.assert_allclose(envelope[mid_start:mid_end], 5.0, atol=0.5)
+        # 恒定信号: RMS = 5.0，从暖机结束后即应精确
+        # 暖机期 = max(rms_window=50, smooth_window=20) = 50 样本
+        np.testing.assert_allclose(envelope[60:], 5.0, atol=0.1)
 
     def test_extract_sine_wave(self, extractor):
         """正弦波的包络应为接近其振幅的平滑曲线"""
@@ -36,7 +35,7 @@ class TestEnvelopeExtractor:
         envelope = extractor.extract(signal)
         # RMS of sine = amplitude / sqrt(2) ≈ 2.12
         expected_rms = amplitude / np.sqrt(2)
-        # 稳态区域 (跳过前端的暂态)
+        # 稳态区域 (跳过暖机暂态)
         steady = envelope[100:]
         mean_env = np.mean(steady)
         assert abs(mean_env - expected_rms) < 0.5
@@ -47,7 +46,7 @@ class TestEnvelopeExtractor:
         assert len(result) == 0
 
     def test_extract_single_value(self, extractor):
-        """提取单个值"""
+        """提取单个值 (静态工具方法)"""
         result = extractor.extract_single(np.array([3.0, 4.0]))
         expected = np.sqrt((9.0 + 16.0) / 2)
         assert abs(result - expected) < 0.01
@@ -57,3 +56,47 @@ class TestEnvelopeExtractor:
         data = np.random.randn(500) * 10
         envelope = extractor.extract(data)
         assert np.all(envelope >= 0)
+
+    def test_streaming_chunked_vs_batch(self, extractor):
+        """分块流式处理结果应与一次性处理完全一致"""
+        data = np.random.randn(300) * 5.0
+
+        # 一次性处理
+        batch_result = extractor.extract(data)
+
+        # 重置后分块处理
+        extractor.reset()
+        chunk_sizes = [3, 5, 2, 7, 4, 10, 6]  # 模拟不规则小块
+        idx = 0
+        chunks_result = []
+        while idx < len(data):
+            size = chunk_sizes[len(chunks_result) % len(chunk_sizes)]
+            chunk = data[idx:idx + size]
+            chunks_result.append(extractor.extract(chunk))
+            idx += size
+
+        streamed_result = np.concatenate(chunks_result)
+        np.testing.assert_array_almost_equal(batch_result, streamed_result)
+
+    def test_streaming_tiny_chunks(self, extractor):
+        """极小块 (1~2 样本) 不应崩溃或产生 NaN"""
+        data = np.random.randn(100) * 3.0
+        results = []
+        for sample in data:
+            r = extractor.extract(np.array([sample]))
+            results.append(r[0])
+        envelope = np.array(results)
+        assert len(envelope) == 100
+        assert not np.any(np.isnan(envelope))
+        assert np.all(envelope >= 0)
+
+    def test_reset(self, extractor):
+        """重置后状态清空，可重新处理"""
+        data = np.ones(100) * 5.0
+        extractor.extract(data)
+        extractor.reset()
+        # 重置后第一个样本应是暖机值，不应残留旧状态
+        result = extractor.extract(np.array([3.0]))
+        assert len(result) == 1
+        # 暖机期 fill=1, rms=3.0, smooth=3.0
+        assert abs(result[0] - 3.0) < 0.01

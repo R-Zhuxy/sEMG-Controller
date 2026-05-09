@@ -36,8 +36,9 @@ class FilterConfig:
     """数字滤波器参数"""
     bandpass_low: float = 20.0      # 带通下限 (Hz)
     bandpass_high: float = 200.0    # 带通上限 (Hz), 须 < Nyquist (250Hz)
-    notch_freq: float = 50.0        # 工频陷波频率 (Hz)
-    notch_quality: float = 30.0     # 陷波器品质因子
+    notch_freq: float = 50.0        # 工频陷波频率 (Hz) [兼容旧接口]
+    notch_quality: float = 15.0     # 陷波器品质因子 (Q=15, 带宽~3.3Hz, 容忍电网±1Hz漂移)
+    notch_harmonics: tuple[float, ...] = (50.0,)  # 陷波频率列表 (默认仅基波)
     filter_order: int = 4           # Butterworth 滤波器阶数
 
 

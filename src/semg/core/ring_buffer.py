@@ -3,6 +3,8 @@
 
 基于 NumPy 数组实现的线程安全环形缓冲区 (Ring Buffer / Circular Buffer)。
 固定容量，FIFO 覆写策略，用于控制 sEMG 数据流的内存消耗。
+
+v0.2: 新增 read_index + read_new() 方法，支持"只消费全新样本"的流式处理。
 """
 
 import numpy as np
@@ -25,6 +27,7 @@ class RingBuffer:
         self._buffer = np.zeros(capacity, dtype=dtype)
         self._write_index = 0       # 下一个写入位置
         self._total_written = 0     # 累计写入总数
+        self._read_index = 0        # 消费者读指针 (read_new 专用)
         self._lock = threading.Lock()
 
     @property
@@ -76,9 +79,41 @@ class RingBuffer:
 
             self._total_written += n
 
+    def read_new(self) -> np.ndarray:
+        """
+        读取自上次 read_new() 以来所有未消费的新样本。
+
+        按时间顺序排列 (最旧在前)，读后自动推进读指针。
+        如果写入速度超过消费速度导致数据被覆写，只返回仍然可用的部分。
+
+        Returns:
+            numpy 数组，包含所有未读的新样本；若无新数据则返回空数组
+        """
+        with self._lock:
+            if self._total_written <= self._read_index:
+                return np.array([], dtype=self._buffer.dtype)
+
+            # 计算未读样本数 (不超过容量，防止写指针转了整圈覆写)
+            unread = min(self._total_written - self._read_index, self._capacity)
+            start = (self._write_index - unread) % self._capacity
+
+            if start + unread <= self._capacity:
+                data = self._buffer[start:start + unread].copy()
+            else:
+                tail_len = self._capacity - start
+                data = np.concatenate([
+                    self._buffer[start:],
+                    self._buffer[:unread - tail_len]
+                ])
+
+            self._read_index = self._total_written
+            return data
+
     def get_latest(self, n: int) -> np.ndarray:
         """
         获取最近 n 个采样值（按时间顺序排列，最旧在前）
+
+        注意：此方法不影响 read_new() 的读指针，用于校准等只读场景。
 
         Args:
             n: 请求的采样点数
@@ -112,6 +147,7 @@ class RingBuffer:
             self._buffer[:] = 0
             self._write_index = 0
             self._total_written = 0
+            self._read_index = 0
 
     def __len__(self) -> int:
         return self.count

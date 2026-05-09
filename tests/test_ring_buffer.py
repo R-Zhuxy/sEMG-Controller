@@ -1,11 +1,11 @@
-"""RingBuffer 单元测试"""
+"""RingBuffer 单元测试 (含 read_new 流式消费测试)"""
 
 import numpy as np
 import pytest
 import sys
 import os
 
-# 添加项目根目录到 Python 路径
+# 添加 src 目录到 Python 路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
 from semg.core.ring_buffer import RingBuffer
@@ -109,6 +109,72 @@ class TestRingBufferGetLatest:
         buf.extend(np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]))
         result = buf.get_latest(4)
         np.testing.assert_array_equal(result, [3.0, 4.0, 5.0, 6.0])
+
+
+class TestRingBufferReadNew:
+    """read_new() 流式消费测试"""
+
+    def test_read_new_basic(self):
+        """首次 read_new 应返回所有已写入数据"""
+        buf = RingBuffer(capacity=10)
+        buf.extend(np.array([1.0, 2.0, 3.0]))
+        result = buf.read_new()
+        np.testing.assert_array_equal(result, [1.0, 2.0, 3.0])
+
+    def test_read_new_advances_pointer(self):
+        """read_new 后再次调用应返回空"""
+        buf = RingBuffer(capacity=10)
+        buf.extend(np.array([1.0, 2.0, 3.0]))
+        buf.read_new()
+        result = buf.read_new()
+        assert len(result) == 0
+
+    def test_read_new_incremental(self):
+        """多次写入间穿插 read_new，每次只返回新写入的部分"""
+        buf = RingBuffer(capacity=20)
+        buf.extend(np.array([1.0, 2.0]))
+        r1 = buf.read_new()
+        np.testing.assert_array_equal(r1, [1.0, 2.0])
+
+        buf.extend(np.array([3.0, 4.0, 5.0]))
+        r2 = buf.read_new()
+        np.testing.assert_array_equal(r2, [3.0, 4.0, 5.0])
+
+        buf.append(6.0)
+        r3 = buf.read_new()
+        np.testing.assert_array_equal(r3, [6.0])
+
+    def test_read_new_wrap_around(self):
+        """写入超过容量后，read_new 只返回容量内可用的未读数据"""
+        buf = RingBuffer(capacity=4)
+        buf.extend(np.array([1.0, 2.0, 3.0, 4.0, 5.0, 6.0]))
+        result = buf.read_new()
+        # 容量 4，写了 6 个，可用的最新 4 个
+        np.testing.assert_array_equal(result, [3.0, 4.0, 5.0, 6.0])
+
+    def test_read_new_does_not_affect_get_latest(self):
+        """read_new 不影响 get_latest 的行为"""
+        buf = RingBuffer(capacity=10)
+        buf.extend(np.array([1.0, 2.0, 3.0, 4.0, 5.0]))
+        buf.read_new()  # 消费掉所有
+
+        # get_latest 仍然能读到数据 (它不依赖 read_index)
+        result = buf.get_latest(3)
+        np.testing.assert_array_equal(result, [3.0, 4.0, 5.0])
+
+    def test_read_new_empty_buffer(self):
+        """空缓冲区 read_new 返回空数组"""
+        buf = RingBuffer(capacity=10)
+        result = buf.read_new()
+        assert len(result) == 0
+
+    def test_read_new_after_clear(self):
+        """clear 后 read_new 返回空"""
+        buf = RingBuffer(capacity=10)
+        buf.extend(np.array([1.0, 2.0, 3.0]))
+        buf.clear()
+        result = buf.read_new()
+        assert len(result) == 0
 
 
 class TestRingBufferClear:
