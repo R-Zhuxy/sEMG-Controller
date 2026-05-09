@@ -24,14 +24,17 @@ if sys.platform == 'win32':
         line_buffering=True
     )
 
-from src.semg.config import SystemConfig
-from src.semg.core.ring_buffer import RingBuffer
-from src.semg.communication.serial_reader import SerialReader
-from src.semg.processing.filters import SignalFilter
-from src.semg.processing.envelope import EnvelopeExtractor
-from src.semg.processing.calibration import Calibrator
-from src.semg.classification.schmitt_trigger import SchmittTrigger, MuscleState
-from src.semg.action.key_mapper import KeyMapper
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
+
+from semg.config import SystemConfig
+from semg.core.ring_buffer import RingBuffer
+from semg.communication.serial_reader import SerialReader
+from semg.processing.filters import SignalFilter
+from semg.processing.envelope import EnvelopeExtractor
+from semg.processing.calibration import Calibrator
+from semg.classification.schmitt_trigger import SchmittTrigger, MuscleState
+from semg.action.key_mapper import KeyMapper
 
 
 def setup_logging() -> None:

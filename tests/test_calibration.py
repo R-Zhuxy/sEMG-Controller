@@ -4,10 +4,10 @@ import numpy as np
 import sys
 import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from src.semg.config import CalibrationConfig, SchmittTriggerConfig
-from src.semg.processing.calibration import Calibrator
+from semg.config import CalibrationConfig, SchmittTriggerConfig
+from semg.processing.calibration import Calibrator
 
 
 class TestCalibrator:

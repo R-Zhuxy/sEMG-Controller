@@ -5,10 +5,10 @@ import pytest
 import sys
 import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from src.semg.config import EnvelopeConfig
-from src.semg.processing.envelope import EnvelopeExtractor
+from semg.config import EnvelopeConfig
+from semg.processing.envelope import EnvelopeExtractor
 
 
 class TestEnvelopeExtractor:

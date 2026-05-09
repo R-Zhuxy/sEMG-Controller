@@ -6,9 +6,9 @@ import sys
 import os
 
 # 添加项目根目录到 Python 路径
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from src.semg.core.ring_buffer import RingBuffer
+from semg.core.ring_buffer import RingBuffer
 
 
 class TestRingBufferInit:

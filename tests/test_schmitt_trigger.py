@@ -4,9 +4,9 @@ import time
 import sys
 import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from src.semg.classification.schmitt_trigger import SchmittTrigger, MuscleState
+from semg.classification.schmitt_trigger import SchmittTrigger, MuscleState
 
 
 class TestSchmittTrigger:

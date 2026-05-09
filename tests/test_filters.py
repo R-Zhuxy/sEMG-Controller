@@ -5,10 +5,10 @@ import pytest
 import sys
 import os
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from src.semg.config import FilterConfig, SamplingConfig
-from src.semg.processing.filters import SignalFilter
+from semg.config import FilterConfig, SamplingConfig
+from semg.processing.filters import SignalFilter
 
 
 class TestSignalFilter:
