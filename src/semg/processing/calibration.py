@@ -83,13 +83,17 @@ class Calibrator:
             + self._schmitt_config.low_threshold_factor * baseline_std
         )
 
-        # 计算信噪比 (SNR)
-        signal_power = np.mean(envelope_data ** 2)
+        # 计算信噪比 (SNR) (F-11: 使用标准的信号平均功率比线噪功率)
+        signal_power = baseline_mean ** 2
         noise_power = baseline_std ** 2
-        if noise_power > 0:
+        if noise_power > 0 and signal_power > 0:
             snr_db = float(10 * np.log10(signal_power / noise_power))
-        else:
+        elif noise_power == 0:
+            # 噪声完全为 0 (理想情况)
             snr_db = float('inf')
+        else:
+            # 信号平均幅值为 0 但存在噪声
+            snr_db = float('-inf')
 
         result = CalibrationResult(
             baseline_mean=baseline_mean,

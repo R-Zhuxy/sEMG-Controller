@@ -100,3 +100,22 @@ class TestEnvelopeExtractor:
         assert len(result) == 1
         # 暖机期 fill=1, rms=3.0, smooth=3.0
         assert abs(result[0] - 3.0) < 0.01
+
+    def test_nan_self_healing(self, extractor):
+        """测试在输入包含 NaN/inf 时，自愈哨兵是否能防止崩溃并在后续自愈 (F-10)"""
+        # 正常数据
+        data1 = np.ones(50) * 5.0
+        extractor.extract(data1)
+
+        # 注入 NaN/inf 数据块
+        nan_block = np.array([np.nan, 2.0, np.inf])
+        env_nan = extractor.extract(nan_block)
+        # 应能够正常运行，不崩溃
+        assert len(env_nan) == 3
+
+        # 再次注入后续正常数据
+        data2 = np.ones(100) * 5.0
+        env_steady = extractor.extract(data2)
+        # 经过 50+ 样本后，由于自愈哨兵重置或重算，包络应完全收敛回正常值 5.0，没有永久停留在 NaN 状态
+        assert not np.any(np.isnan(env_steady[60:]))
+        np.testing.assert_allclose(env_steady[60:], 5.0, atol=0.1)

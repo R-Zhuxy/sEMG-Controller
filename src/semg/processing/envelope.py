@@ -42,6 +42,9 @@ class EnvelopeExtractor:
         self._smooth_sum = 0.0
         self._smooth_fill = 0
 
+        # ── 浮点累积校验计数器 (F-10) ──
+        self._sample_count = 0
+
     def extract(self, data: np.ndarray) -> np.ndarray:
         """
         流式包络提取 - 处理一个数据块并维护跨块状态
@@ -71,6 +74,23 @@ class EnvelopeExtractor:
             # 防止浮点累积导致微小负值
             if self._rms_sum_sq < 0.0:
                 self._rms_sum_sq = 0.0
+
+            # 递增并校验浮点累积 (F-10)
+            self._sample_count += 1
+            if self._sample_count % 10000 == 0:
+                # 定期全量重算以消除浮点舍入累积误差
+                self._rms_sum_sq = float(np.sum(self._rms_history[:self._rms_fill] ** 2))
+                self._smooth_sum = float(np.sum(self._smooth_history[:self._smooth_fill]))
+
+            # 非有限数 (NaN/inf) 哨兵保护与自愈机制 (F-10)
+            if not np.isfinite(self._rms_sum_sq):
+                # 尝试用当前有效历史切片重算平方和
+                self._rms_sum_sq = float(np.sum(self._rms_history[:self._rms_fill] ** 2))
+                if not np.isfinite(self._rms_sum_sq):
+                    # 历史值被 NaN 污染，强制紧急重置，保障持续可用性
+                    self._rms_sum_sq = 0.0
+                    self._rms_history[:] = 0.0
+
             self._rms_idx = (self._rms_idx + 1) % self._rms_window
             if self._rms_fill < self._rms_window:
                 self._rms_fill += 1
@@ -82,6 +102,14 @@ class EnvelopeExtractor:
             self._smooth_sum += rms_val - old_val
             if self._smooth_sum < 0.0:
                 self._smooth_sum = 0.0
+
+            # 非有限数 (NaN/inf) 哨兵保护与自愈机制 (F-10)
+            if not np.isfinite(self._smooth_sum):
+                self._smooth_sum = float(np.sum(self._smooth_history[:self._smooth_fill]))
+                if not np.isfinite(self._smooth_sum):
+                    self._smooth_sum = 0.0
+                    self._smooth_history[:] = 0.0
+
             self._smooth_idx = (self._smooth_idx + 1) % self._smooth_window
             if self._smooth_fill < self._smooth_window:
                 self._smooth_fill += 1
@@ -110,6 +138,7 @@ class EnvelopeExtractor:
         self._rms_idx = 0
         self._rms_sum_sq = 0.0
         self._rms_fill = 0
+        self._sample_count = 0      # 校验计数器清零 (F-10)
 
         self._smooth_history[:] = 0.0
         self._smooth_idx = 0

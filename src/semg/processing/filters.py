@@ -87,11 +87,18 @@ class SignalFilter:
         if len(data) == 0:
             return data
 
-        # 首次调用时用第一个样本值初始化所有滤波器状态
+        # 首次调用时初始化所有滤波器状态 (F-09)
         if not self._initialized:
+            # 1. 陷波器（Notch Filter）：在直流（0Hz）处具有非零频率响应。
+            # 用首个数据点 data[0] 初始化，有助于让状态快速适应基线偏移，消解阶跃响应。
             for i, (b, a) in enumerate(self._notch_filters):
                 self._notch_zis[i] = sig.lfilter_zi(b, a) * data[0]
-            self._bp_zi = sig.sosfilt_zi(self._bp_sos) * data[0]
+
+            # 2. 带通滤波器（Bandpass Filter）：低截止频率通常为 20Hz。
+            # 直流（0Hz）成分处于其阻带内，其稳态响应为 0。
+            # 用 data[0] 缩放初始条件 zi 毫无物理意义，反而可能在首样存在突变时产生多余的充能冲击。
+            # 此处应直接将其初始条件初始化为零向量。
+            self._bp_zi = sig.sosfilt_zi(self._bp_sos) * 0.0
             self._initialized = True
 
         # 级联陷波 (消除工频干扰及其谐波)
