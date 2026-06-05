@@ -62,3 +62,33 @@ class TestCalibrator:
         data_high_snr = np.random.normal(loc=10.0, scale=0.01, size=1000)
         result_high = calibrator.compute_thresholds(data_high_snr)
         assert result_high.snr_db > 30  # 应该有很高的 SNR
+
+    def test_run_calibration_warmup_cropping(self):
+        """测试 main.py 中的 run_calibration 正常工作，且能合理剪切暖机暂态"""
+        from main import run_calibration
+        from semg.config import SystemConfig
+        from semg.core.ring_buffer import RingBuffer
+        from semg.processing.filters import SignalFilter
+        from semg.processing.envelope import EnvelopeExtractor
+        from semg.processing.calibration import Calibrator
+
+        config = SystemConfig()
+        config.calibration.calibration_duration = 1.0  # 限制为 1.0s, 共 500 个样本
+        samples_needed = int(config.calibration.calibration_duration * config.sampling.sample_rate)
+
+        buffer = RingBuffer(capacity=1024)
+        # 填充恒定值为 100.0 的数据作为静息基线
+        for _ in range(samples_needed):
+            buffer.append(100.0)
+
+        sig_filter = SignalFilter(config.filter, config.sampling)
+        envelope_ext = EnvelopeExtractor(config.envelope)
+        calibrator = Calibrator(config.calibration, config.schmitt)
+
+        # 运行校准，验证是否能够正常完成计算并返回结果，不抛出异常
+        result = run_calibration(buffer, sig_filter, envelope_ext, calibrator, config)
+
+        assert result.baseline_mean is not None
+        assert result.baseline_std is not None
+        assert result.high_threshold > result.low_threshold
+

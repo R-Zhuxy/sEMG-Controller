@@ -10,11 +10,13 @@ import sys
 import time
 import signal
 import logging
+import threading
+from logging.handlers import RotatingFileHandler
 
 import numpy as np
 
 # Windows 终端强制 UTF-8 输出，防止 GBK 编码错误
-if sys.platform == 'win32':
+if sys.platform == 'win32' and __name__ == "__main__":
     sys.stdout = io.TextIOWrapper(
         sys.stdout.buffer, encoding='utf-8', errors='replace',
         line_buffering=True
@@ -38,14 +40,20 @@ from semg.action.key_mapper import KeyMapper
 
 
 def setup_logging() -> None:
-    """配置日志系统"""
+    """配置日志系统，限制日志文件大小并自动轮转，防止无限增长 (F-13)"""
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s [%(name)s] %(levelname)s: %(message)s',
         datefmt='%H:%M:%S',
         handlers=[
             logging.StreamHandler(sys.stdout),
-            logging.FileHandler('semg_session.log', encoding='utf-8'),
+            # 使用 RotatingFileHandler 限制单个文件最大 5MB，保留最多 3 个备份
+            RotatingFileHandler(
+                'semg_session.log',
+                maxBytes=5 * 1024 * 1024,
+                backupCount=3,
+                encoding='utf-8'
+            ),
         ]
     )
 
@@ -117,11 +125,19 @@ def run_calibration(
     # 推进 read_new 读指针，跳过校准期间已处理的数据
     buffer.read_new()
 
+    # F-08: 裁掉 DSP 暖机暂态 (滤波器 settling + RMS滑窗 + 平滑滑窗)
+    # 避免开头由于滑动窗口未填满造成的低瞬态包络值污染基线计算 (拉低 mean 且拉高 std)
+    warmup_samples = max(
+        config.envelope.rms_window_size + config.envelope.smoothing_window_size,
+        int(0.1 * config.sampling.sample_rate)  # 至少保证 100ms 暖机切除
+    )
+    envelope_steady = envelope_data[warmup_samples:]
+
     # 注意：不重置滤波器/包络状态！
     # 校准数据就是实际信号流的开头，后续主循环的 apply() 自然衔接此处的 zi 状态。
 
-    # 计算阈值
-    return calibrator.compute_thresholds(envelope_data)
+    # 计算阈值 (使用已裁去暖机暂态的稳态包络数据)
+    return calibrator.compute_thresholds(envelope_steady)
 
 
 def main() -> None:
@@ -142,12 +158,11 @@ def main() -> None:
     calibrator = Calibrator(config.calibration, config.schmitt)
     key_mapper = KeyMapper(config.action)
 
-    # 优雅退出处理
-    shutdown_flag = False
+    # F-14: 优雅退出处理 (使用 Event 确保高并发和无 GIL 下的线程与写入原子性)
+    shutdown_event = threading.Event()
 
     def signal_handler(signum, frame):
-        nonlocal shutdown_flag
-        shutdown_flag = True
+        shutdown_event.set()
         print("\n\n  [!] 收到中断信号，正在安全退出...")
 
     signal.signal(signal.SIGINT, signal_handler)
@@ -192,11 +207,12 @@ def main() -> None:
         cycle_count = 0
         current_envelope = 0.0
 
-        while not shutdown_flag:
+        while not shutdown_event.is_set():
             # 只读取未消费的全新样本 (不重叠！)
             new_samples = buffer.read_new()
             if len(new_samples) == 0:
-                time.sleep(0.005)
+                # 限制处理周期，并能在收到退出信号时立即响应
+                shutdown_event.wait(timeout=0.005)
                 continue
 
             # 流式滤波 (输入严格为新数据，IIR 状态正确累积)
@@ -233,8 +249,8 @@ def main() -> None:
                 )
                 last_status_time = now
 
-            # 控制处理频率 (~200Hz 处理循环)
-            time.sleep(0.005)
+            # 控制处理频率 (~200Hz 处理循环)，使用 wait 代替 sleep，提高响应及时性
+            shutdown_event.wait(timeout=0.005)
 
     except TimeoutError as e:
         logger.error(f"超时错误: {e}")
