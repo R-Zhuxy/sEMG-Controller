@@ -114,3 +114,29 @@ class TestSchmittTrigger:
 
         trigger.reset()
         assert trigger.state == MuscleState.RELAXED
+
+    def test_debounce_with_monotonic(self):
+        """测试防抖时间延迟触发是否正常 (F-12)"""
+        trigger = SchmittTrigger(
+            high_threshold=1.0,
+            low_threshold=0.5,
+            debounce_time=0.05,        # 0.05秒防抖
+            min_activation_time=0.0
+        )
+
+        # 超过阈值，首次调用不应立刻变为 ACTIVATED，而是记录 pending
+        res = trigger.update(1.5)
+        assert res is None
+        assert trigger.state == MuscleState.RELAXED
+
+        # 立即再次更新，防抖计时未过，应继续保持 RELAXED
+        res = trigger.update(1.5)
+        assert res is None
+
+        # 等待 0.06 秒超过防抖时间
+        time.sleep(0.06)
+
+        # 时间超过后再次调用 update，应确认状态翻转
+        res = trigger.update(1.5)
+        assert res == MuscleState.ACTIVATED
+        assert trigger.state == MuscleState.ACTIVATED

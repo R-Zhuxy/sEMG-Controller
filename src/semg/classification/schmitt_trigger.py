@@ -80,7 +80,7 @@ class SchmittTrigger:
         Returns:
             如果状态发生跳变，返回新状态；否则返回 None
         """
-        now = time.time()
+        now = time.monotonic()  # F-12: 使用单调时钟替代系统墙钟，防范 NTP 时间跳变对防抖时间的干扰
 
         if self._state == MuscleState.RELAXED:
             return self._handle_relaxed(envelope_value, now)

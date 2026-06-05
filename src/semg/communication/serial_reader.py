@@ -41,6 +41,7 @@ class SerialReader:
         self._thread: threading.Thread | None = None
         self._running = threading.Event()
         self._connected = threading.Event()
+        self._stats_lock = threading.Lock()  # 统计数据锁保护 (F-04)
         self._sample_count = 0
         self._error_count = 0
 
@@ -54,11 +55,13 @@ class SerialReader:
 
     @property
     def sample_count(self) -> int:
-        return self._sample_count
+        with self._stats_lock:
+            return self._sample_count
 
     @property
     def error_count(self) -> int:
-        return self._error_count
+        with self._stats_lock:
+            return self._error_count
 
     def start(self) -> None:
         """启动串口读取线程"""
@@ -85,9 +88,12 @@ class SerialReader:
             self._thread.join(timeout=3.0)
             self._thread = None
         self._close_serial()
+        with self._stats_lock:
+            sample_cnt = self._sample_count
+            error_cnt = self._error_count
         logger.info(
-            f"SerialReader 停止 (共采集 {self._sample_count} 个采样点, "
-            f"{self._error_count} 个解析错误)"
+            f"SerialReader 停止 (共采集 {sample_cnt} 个采样点, "
+            f"{error_cnt} 个解析错误)"
         )
 
     def wait_for_connection(self, timeout: float = 10.0) -> bool:
@@ -165,7 +171,8 @@ class SerialReader:
                     value = self._parse_line(line)
                     if value is not None:
                         batch.append(value)
-                        self._sample_count += 1
+                        with self._stats_lock:
+                            self._sample_count += 1
 
                         # 批量入队：积累够 BATCH_SIZE 个才上锁写入一次
                         if len(batch) >= _BATCH_SIZE:
@@ -181,9 +188,11 @@ class SerialReader:
                     batch.clear()
             except serial.SerialException as e:
                 logger.error(f"串口读取错误: {e}")
+                batch.clear()  # F-05: 丢弃时间断裂的残余数据，避免重连后产生阶跃响应
                 self._close_serial()
             except OSError as e:
                 logger.error(f"系统 I/O 错误: {e}")
+                batch.clear()  # F-05: 同上
                 self._close_serial()
 
         # 线程退出前刷入剩余数据
@@ -208,11 +217,13 @@ class SerialReader:
                 return float(text)
             return None
         except (ValueError, UnicodeDecodeError) as e:
-            self._error_count += 1
+            with self._stats_lock:
+                self._error_count += 1
+                curr_error_count = self._error_count
             # 前 10 个错误每次都报，之后每 100 次报一次，避免日志洪泛
-            if self._error_count <= 10 or self._error_count % 100 == 0:
+            if curr_error_count <= 10 or curr_error_count % 100 == 0:
                 logger.warning(
-                    f"串口数据解析失败 (第 {self._error_count} 次): "
+                    f"串口数据解析失败 (第 {curr_error_count} 次): "
                     f"raw={line!r}, error={e}"
                 )
             return None
