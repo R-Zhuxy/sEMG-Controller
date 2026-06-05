@@ -75,25 +75,28 @@ class EnvelopeExtractor:
             if self._rms_sum_sq < 0.0:
                 self._rms_sum_sq = 0.0
 
-            # 递增并校验浮点累积 (F-10)
+            # 递增统计样本点数
             self._sample_count += 1
+
+            # 先对齐滑窗内部状态 (更新环形写入索引及当前有效样本数)
+            self._rms_idx = (self._rms_idx + 1) % self._rms_window
+            if self._rms_fill < self._rms_window:
+                self._rms_fill += 1
+
+            # 定期全量重算以消除累积误差 (F-10)
             if self._sample_count % 10000 == 0:
-                # 定期全量重算以消除浮点舍入累积误差
                 self._rms_sum_sq = float(np.sum(self._rms_history[:self._rms_fill] ** 2))
                 self._smooth_sum = float(np.sum(self._smooth_history[:self._smooth_fill]))
 
             # 非有限数 (NaN/inf) 哨兵保护与自愈机制 (F-10)
             if not np.isfinite(self._rms_sum_sq):
-                # 尝试用当前有效历史切片重算平方和
+                # 尝试用当前有效历史切片重算平方和 (此时 self._rms_fill 已经是更新后的准确有效数)
                 self._rms_sum_sq = float(np.sum(self._rms_history[:self._rms_fill] ** 2))
                 if not np.isfinite(self._rms_sum_sq):
                     # 历史值被 NaN 污染，强制紧急重置，保障持续可用性
                     self._rms_sum_sq = 0.0
                     self._rms_history[:] = 0.0
 
-            self._rms_idx = (self._rms_idx + 1) % self._rms_window
-            if self._rms_fill < self._rms_window:
-                self._rms_fill += 1
             rms_val = np.sqrt(self._rms_sum_sq / self._rms_fill)
 
             # Step 3: 滑动平均平滑 — O(1) 累积更新
@@ -103,16 +106,18 @@ class EnvelopeExtractor:
             if self._smooth_sum < 0.0:
                 self._smooth_sum = 0.0
 
+            self._smooth_idx = (self._smooth_idx + 1) % self._smooth_window
+            if self._smooth_fill < self._smooth_window:
+                self._smooth_fill += 1
+
             # 非有限数 (NaN/inf) 哨兵保护与自愈机制 (F-10)
             if not np.isfinite(self._smooth_sum):
+                # 尝试用当前有效平滑历史切片重算 (此时 self._smooth_fill 已经是更新后的准确有效数)
                 self._smooth_sum = float(np.sum(self._smooth_history[:self._smooth_fill]))
                 if not np.isfinite(self._smooth_sum):
                     self._smooth_sum = 0.0
                     self._smooth_history[:] = 0.0
 
-            self._smooth_idx = (self._smooth_idx + 1) % self._smooth_window
-            if self._smooth_fill < self._smooth_window:
-                self._smooth_fill += 1
             result[i] = self._smooth_sum / self._smooth_fill
 
         return result

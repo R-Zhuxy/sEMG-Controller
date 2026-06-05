@@ -57,10 +57,20 @@ void loop() {
         // 累加而非赋值，防止因 loop() 执行耗时导致的长期时间漂移
         lastSampleTime += SAMPLE_INTERVAL_US;
 
+        // F-01: 增加追赶保护（anti-windup guard），防范阻塞解除后产生采样风暴
+        // 如果落后时间超过 10 个采样周期（约 20ms），直接跳跃重置到当前时间，重新对齐
+        if (currentTime - lastSampleTime >= SAMPLE_INTERVAL_US * 10) {
+            lastSampleTime = currentTime;
+        }
+
         // 读取真实传感器 ADC 值 (10-bit: 0-1023)
         int adcValue = analogRead(SENSOR_PIN);
 
-        // 发送文本格式数据：一行一个整数，以 '\n' 结尾
-        Serial.println(adcValue);
+        // F-02: 发送前校验 FIFO 发送缓冲区空闲字节数，防止缓冲区满时导致 micros() 采样定时停滞
+        // 每一帧文本格式的数据长度最大为: "1023\r\n" = 6 字节
+        if (Serial.availableForWrite() >= 6) {
+            Serial.println(adcValue);
+        }
+        // 如果 FIFO 空间不足，则丢弃本帧数据，优先保证采样定时的绝对精准
     }
 }

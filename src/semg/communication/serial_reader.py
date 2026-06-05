@@ -212,11 +212,12 @@ class SerialReader:
             失败时递增误码计数器并记录警告日志
         """
         try:
-            text = line.decode('ascii').strip()
+            # F-06: 统一使用 errors='ignore' 解码，消除脏乱码字节引发 UnicodeDecodeError 带来的 CPU 性能损耗
+            text = line.decode('ascii', errors='ignore').strip()
             if text:
                 return float(text)
             return None
-        except (ValueError, UnicodeDecodeError) as e:
+        except ValueError as e:
             with self._stats_lock:
                 self._error_count += 1
                 curr_error_count = self._error_count
