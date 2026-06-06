@@ -85,13 +85,13 @@ class EnvelopeExtractor:
 
             # 定期全量重算以消除累积误差 (F-10)
             if self._sample_count % 10000 == 0:
-                self._rms_sum_sq = float(np.sum(self._rms_history[:self._rms_fill] ** 2))
+                self._rms_sum_sq = float(np.sum(self._rms_history[:self._rms_fill]))
                 self._smooth_sum = float(np.sum(self._smooth_history[:self._smooth_fill]))
 
             # 非有限数 (NaN/inf) 哨兵保护与自愈机制 (F-10)
             if not np.isfinite(self._rms_sum_sq):
                 # 尝试用当前有效历史切片重算平方和 (此时 self._rms_fill 已经是更新后的准确有效数)
-                self._rms_sum_sq = float(np.sum(self._rms_history[:self._rms_fill] ** 2))
+                self._rms_sum_sq = float(np.sum(self._rms_history[:self._rms_fill]))
                 if not np.isfinite(self._rms_sum_sq):
                     # 历史值被 NaN 污染，强制紧急重置，保障持续可用性
                     self._rms_sum_sq = 0.0

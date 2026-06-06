@@ -22,8 +22,11 @@ from ..config import SerialConfig
 logger = logging.getLogger(__name__)
 
 # 每积累 BATCH_SIZE 个样本才一次性 extend 入缓冲区
-# 500Hz / 25 = 20 次/秒上锁，相比逐样本 append 降低 96%
-_BATCH_SIZE = 25
+# [演示模式极低延时优化]: 降低为 5。
+#   - 500Hz 下，每 10ms 即可上传数据块给主线程，极大地降低了数据入队的拼装时延（从 50ms 缩减至 10ms）
+#   - 对现代 CPU 而言，每秒 100 次的 extend 锁开销完全可忽略。
+# [生物医学/康复场景推荐值]: 25-50 (每秒上锁 10-20 次，可获得极高的稳定性和极小的 CPU 开销)
+_BATCH_SIZE = 5
 
 
 class SerialReader:

@@ -45,8 +45,13 @@ class FilterConfig:
 @dataclass
 class EnvelopeConfig:
     """包络提取参数"""
-    rms_window_size: int = 50       # RMS 计算窗口 (samples)
-    smoothing_window_size: int = 20 # 移动平均平滑窗口 (samples)
+    # [演示模式极低延时优化]: 25 (在 500Hz 下窗口宽度为 50ms，群延迟 25ms)
+    # [生物医学/康复场景推荐值]: 50-100 (提供极佳的包络光滑度，滤除发力起伏波动)
+    rms_window_size: int = 25
+
+    # [演示模式极低延时优化]: 10 (平滑延迟缩短为 20ms)
+    # [生物医学/康复场景推荐值]: 20-30 (提供更好的抗高噪波能力)
+    smoothing_window_size: int = 10
 
 
 @dataclass
@@ -54,8 +59,14 @@ class SchmittTriggerConfig:
     """施密特触发器参数"""
     high_threshold_factor: float = 3.0  # 激活阈值 = baseline_mean + factor * baseline_std
     low_threshold_factor: float = 1.5   # 释放阈值 = baseline_mean + factor * baseline_std
-    debounce_time: float = 0.10         # 防抖时间 (秒)
-    min_activation_time: float = 0.05   # 最短激活持续时间 (秒)
+
+    # [演示模式极低延时优化]: 0.02 (20ms 触发防抖，让动作反应极其灵敏，避免起跳延时)
+    # [生物医学/康复场景推荐值]: 0.08-0.15 (80-150ms 避开肢体不自主震颤或轻微误触干扰)
+    debounce_time: float = 0.02
+
+    # [演示模式极低延时优化]: 0.02 (20ms 最短激活，支持游戏中高频越障连按)
+    # [生物医学/康复场景推荐值]: 0.05-0.10 (保证动作分类的明确性和肢体持续姿态)
+    min_activation_time: float = 0.02
 
 
 @dataclass
